@@ -1,0 +1,52 @@
+# ============================================================================
+# GUJARATI VAANI - TRAINING DEPENDENCIES
+# ============================================================================
+# 
+# Target Environment: Azure Standard_NC6 (Tesla T4 GPU, 16GB VRAM)
+# Python Version: 3.9+
+# CUDA Version: 11.8+ (for torch 2.2)
+#
+# Installation:
+#   pip install -r requirements_train.txt
+#
+# ============================================================================
+
+# Core ML Framework
+torch>=2.2.0
+torchvision>=0.17.0
+torchaudio>=2.2.0
+
+# Hugging Face
+transformers>=4.33.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+
+# Audio Processing
+librosa>=0.10.1
+soundfile>=0.12.1
+scipy>=1.11.0
+numpy>=1.24.0
+
+# Data Loading & Utilities
+pandas>=2.0.0
+tqdm>=4.66.0
+
+# Logging & Monitoring
+tensorboard>=2.15.0
+tensorboardX>=2.6
+
+# Azure ML (optional, for cloud integration)
+# azureml-core>=1.50.0
+# azureml-mlflow>=1.50.0
+
+# Development & Debugging
+ipython>=8.0.0
+jupyter>=1.0.0
+matplotlib>=3.7.0
+
+# Testing
+pytest>=7.4.0
+
+# Configuration
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
