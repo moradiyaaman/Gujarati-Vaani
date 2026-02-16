@@ -122,6 +122,51 @@ class _TTSHomePageState extends State<TTSHomePage> {
     return estimatedSeconds.clamp(10, 1200);
   }
 
+  // Validate if text contains Gujarati characters
+  bool _isGujaratiText(String text) {
+    // Gujarati Unicode range: U+0A80 to U+0AFF
+    // Also check for digits in Gujarati: U+0AE6 to U+0AEF
+    final gujaratiPattern = RegExp(r'[\u0A80-\u0AFF]');
+    return gujaratiPattern.hasMatch(text);
+  }
+
+  // Detect predominant language in text
+  String _detectLanguage(String text) {
+    final gujaratiChars = RegExp(r'[\u0A80-\u0AFF]').allMatches(text).length;
+    final hindiChars = RegExp(r'[\u0900-\u097F]').allMatches(text).length;
+    final englishChars = RegExp(r'[a-zA-Z]').allMatches(text).length;
+    final otherIndianChars = RegExp(r'[\u0980-\u09FF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]').allMatches(text).length;
+    
+    // Remove punctuation and spaces for better analysis
+    final cleanText = text.replaceAll(RegExp(r'[\s\p{P}\d]'), '');
+    final totalChars = cleanText.length;
+    
+    if (totalChars == 0) return 'unknown';
+    
+    // If more than 80% Gujarati characters, consider it Gujarati
+    if (gujaratiChars > 0 && (gujaratiChars / totalChars) > 0.8) {
+      return 'gujarati';
+    }
+    
+    // Detect other languages
+    if (hindiChars > gujaratiChars && hindiChars > englishChars) {
+      return 'hindi';
+    }
+    if (englishChars > gujaratiChars && englishChars > hindiChars) {
+      return 'english';
+    }
+    if (otherIndianChars > gujaratiChars) {
+      return 'other_indian';
+    }
+    
+    // If some Gujarati but not dominant
+    if (gujaratiChars > 0) {
+      return 'mixed';
+    }
+    
+    return 'unknown';
+  }
+
   // Start progress timer
   void _startProgressTimer() {
     _elapsedSeconds = 0;
@@ -215,6 +260,86 @@ class _TTSHomePageState extends State<TTSHomePage> {
           content: Text('Please enter some Gujarati text'),
           backgroundColor: Colors.orange,
         ),
+      );
+      return;
+    }
+
+    // Validate Gujarati language
+    final detectedLanguage = _detectLanguage(text);
+    
+    if (detectedLanguage != 'gujarati' && detectedLanguage != 'mixed') {
+      String errorMessage;
+      IconData errorIcon;
+      
+      switch (detectedLanguage) {
+        case 'hindi':
+          errorMessage = 'કૃપા કરીને ગુજરાતી ટેક્સ્ટ દાખલ કરો। આ હિન્દી ભાષા છે.\n(Please enter Gujarati text. This is Hindi language.)';
+          errorIcon = Icons.translate;
+          break;
+        case 'english':
+          errorMessage = 'કૃપા કરીને ગુજરાતી ટેક્સ્ટ દાખલ કરો। આ અંગ્રેજી ભાષા છે.\n(Please enter Gujarati text. This is English language.)';
+          errorIcon = Icons.translate;
+          break;
+        case 'other_indian':
+          errorMessage = 'કૃપા કરીને ગુજરાતી ટેક્સ્ટ દાખલ કરો। આ અન્ય ભારતીય ભાષા છે.\n(Please enter Gujarati text. This is another Indian language.)';
+          errorIcon = Icons.translate;
+          break;
+        default:
+          errorMessage = 'કૃપા કરીને ગુજરાતી ટેક્સ્ટ દાખલ કરો। આ ટેક્સ્ટ ગુજરાતીમાં નથી.\n(Please enter Gujarati text. This text is not in Gujarati.)';
+          errorIcon = Icons.warning;
+      }
+      
+      showDialog(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                Icon(errorIcon, color: Colors.red, size: 28),
+                SizedBox(width: 10),
+                Text(
+                  'Wrong Language',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              errorMessage,
+              style: TextStyle(fontSize: 15, height: 1.4),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  _textController.clear();
+                  setState(() {});
+                },
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                child: Text('Clear Text', style: TextStyle(fontSize: 15)),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text('OK', style: TextStyle(fontSize: 15)),
+              ),
+            ],
+          );
+        },
       );
       return;
     }
