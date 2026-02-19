@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'screens/book_reader_screen.dart';
+import 'screens/chat_screen.dart';
 
 void main() {
   runApp(const GujaratiVaaniApp());
@@ -24,7 +26,73 @@ class GujaratiVaaniApp extends StatelessWidget {
         primarySwatch: Colors.orange,
         useMaterial3: true,
       ),
-      home: const TTSHomePage(),
+      home: const MainNavigation(),
+    );
+  }
+}
+
+/// Main navigation with bottom tabs
+class MainNavigation extends StatefulWidget {
+  const MainNavigation({super.key});
+
+  @override
+  State<MainNavigation> createState() => _MainNavigationState();
+}
+
+class _MainNavigationState extends State<MainNavigation> {
+  int _currentIndex = 0;
+
+  final List<Widget> _screens = [
+    const TTSHomePage(),
+    const BookReaderScreen(),
+    const ChatScreen(),
+  ];
+
+  final List<String> _titles = [
+    'Gujarati Vaani',
+    'Book Reader',
+    'AI Chat',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_titles[_currentIndex]),
+        centerTitle: true,
+        elevation: 0,
+        backgroundColor: Colors.orange,
+        foregroundColor: Colors.white,
+      ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) {
+          setState(() => _currentIndex = index);
+        },
+        backgroundColor: Colors.white,
+        indicatorColor: Colors.orange[100],
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.record_voice_over_outlined),
+            selectedIcon: Icon(Icons.record_voice_over, color: Colors.orange),
+            label: 'TTS',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.auto_stories_outlined),
+            selectedIcon: Icon(Icons.auto_stories, color: Colors.orange),
+            label: 'Books',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_outlined),
+            selectedIcon: Icon(Icons.chat, color: Colors.orange),
+            label: 'AI Chat',
+          ),
+        ],
+      ),
     );
   }
 }
@@ -382,7 +450,7 @@ class _TTSHomePageState extends State<TTSHomePage> {
     }
 
     // For large texts, split into chunks
-    const int maxChunkSize = 500; // characters per chunk
+    const int maxChunkSize = 250; // characters per chunk for better quality
     List<String> chunks;
     
     if (text.length > maxChunkSize) {
@@ -411,7 +479,7 @@ class _TTSHomePageState extends State<TTSHomePage> {
           },
           body: json.encode({
             'text': chunks[i],
-            'speed': 1.0,
+            'speed': 0.9,
           }),
         ).timeout(const Duration(seconds: 120));
 
@@ -441,7 +509,7 @@ class _TTSHomePageState extends State<TTSHomePage> {
             },
             body: json.encode({
               'text': chunks[i],
-              'speed': 1.0,
+              'speed': 0.9,
             }),
           ).timeout(const Duration(seconds: 180));
           
@@ -504,8 +572,12 @@ class _TTSHomePageState extends State<TTSHomePage> {
           // First file: keep full header (44 bytes for WAV)
           combinedAudio.addAll(audioBytes[0]);
           
+          // Add short silence between chunks for natural pauses
+          final silencePadding = List<int>.filled(4800, 0);
+          
           // Subsequent files: skip WAV header (44 bytes)
           for (int i = 1; i < audioBytes.length; i++) {
+            combinedAudio.addAll(silencePadding);
             if (audioBytes[i].length > 44) {
               combinedAudio.addAll(audioBytes[i].sublist(44));
             }
@@ -702,15 +774,7 @@ class _TTSHomePageState extends State<TTSHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gujarati Vaani'),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
-      ),
-      body: SingleChildScrollView(
+    return SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1097,7 +1161,6 @@ class _TTSHomePageState extends State<TTSHomePage> {
             ),
           ],
         ),
-      ),
     );
   }
 }
