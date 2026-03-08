@@ -9,7 +9,8 @@ import 'package:http/http.dart' as http;
 /// - No credit card required
 class GujaratiService {
   // Get your FREE API key from: https://console.groq.com/keys
-  static const String _apiKey = ''; // Commented out for security
+  // Set via environment or replace at build time
+  static const String _apiKey = String.fromEnvironment('GROQ_API_KEY', defaultValue: '');
   static const String _apiUrl = 'https://api.groq.com/openai/v1/chat/completions';
   
   // TTS-optimized system prompt for pure Gujarati

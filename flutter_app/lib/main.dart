@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
-import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'screens/book_reader_screen.dart';
 import 'screens/chat_screen.dart';
+import 'services/tts_service.dart';
 
 void main() {
   runApp(const GujaratiVaaniApp());
@@ -108,8 +106,6 @@ class _TTSHomePageState extends State<TTSHomePage> {
   final TextEditingController _textController = TextEditingController();
   final AudioPlayer _audioPlayer = AudioPlayer();
   
-  static const String apiUrl = 'https://moradiyaaman-gujarati-vaani-tts.hf.space/synthesize';
-  
   bool _isLoading = false;
   double _playbackSpeed = 1.0;
   String? _audioPath;
@@ -167,19 +163,6 @@ class _TTSHomePageState extends State<TTSHomePage> {
     super.dispose();
   }
 
-  // Check internet connection
-  Future<bool> _checkInternetConnection() async {
-    try {
-      final result = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(seconds: 5));
-      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
-    } on SocketException catch (_) {
-      return false;
-    } on TimeoutException catch (_) {
-      return false;
-    }
-  }
-
   // Calculate estimated time based on text length
   int _calculateEstimatedTime(String text) {
     int charCount = text.length;
@@ -188,14 +171,6 @@ class _TTSHomePageState extends State<TTSHomePage> {
     if (numChunks < 1) numChunks = 1;
     int estimatedSeconds = numChunks * 25; // 25 seconds per chunk is more realistic
     return estimatedSeconds.clamp(10, 1200);
-  }
-
-  // Validate if text contains Gujarati characters
-  bool _isGujaratiText(String text) {
-    // Gujarati Unicode range: U+0A80 to U+0AFF
-    // Also check for digits in Gujarati: U+0AE6 to U+0AEF
-    final gujaratiPattern = RegExp(r'[\u0A80-\u0AFF]');
-    return gujaratiPattern.hasMatch(text);
   }
 
   // Detect predominant language in text
@@ -252,71 +227,6 @@ class _TTSHomePageState extends State<TTSHomePage> {
   void _stopProgressTimer() {
     _progressTimer?.cancel();
     _progressTimer = null;
-  }
-
-  // Split text into chunks for processing
-  List<String> _splitTextIntoChunks(String text, int maxChunkSize) {
-    List<String> chunks = [];
-    
-    // First, protect decimal numbers by temporarily replacing them
-    // Match decimal numbers like ૪.૫ or 4.5 and protect them
-    RegExp decimalPattern = RegExp(r'(\d+\.\d+|[૦-૯]+\.[૦-૯]+)');
-    Map<String, String> decimalMap = {};
-    int decimalIndex = 0;
-    
-    String protectedText = text.replaceAllMapped(decimalPattern, (match) {
-      String placeholder = '<<<DECIMAL$decimalIndex>>>';
-      decimalMap[placeholder] = match.group(0)!;
-      decimalIndex++;
-      return placeholder;
-    });
-    
-    // Split by Gujarati sentence endings:
-    // - ।  (Gujarati danda - primary sentence delimiter)
-    // - .  followed by space or end (English period as sentence end)
-    // - !  followed by space or end
-    // - ?  followed by space or end
-    RegExp sentenceEnd = RegExp(r'।|\.(?=\s|$)|!(?=\s|$)|\?(?=\s|$)');
-    
-    List<String> parts = protectedText.split(sentenceEnd);
-    List<Match> delimiters = sentenceEnd.allMatches(protectedText).toList();
-    
-    String currentChunk = '';
-    for (int i = 0; i < parts.length; i++) {
-      String sentence = parts[i].trim();
-      if (sentence.isEmpty) continue;
-      
-      // Restore decimal numbers in this sentence
-      decimalMap.forEach((placeholder, original) {
-        sentence = sentence.replaceAll(placeholder, original);
-      });
-      
-      // Add back the appropriate punctuation
-      String delimiter = (i < delimiters.length) ? delimiters[i].group(0)! : '';
-      // Use Gujarati danda for consistency
-      String sentenceWithPunct = sentence + (delimiter.isNotEmpty ? delimiter : '।') + ' ';
-      
-      if ((currentChunk + sentenceWithPunct).length > maxChunkSize && currentChunk.isNotEmpty) {
-        chunks.add(currentChunk.trim());
-        currentChunk = sentenceWithPunct;
-      } else {
-        currentChunk += sentenceWithPunct;
-      }
-    }
-    
-    if (currentChunk.trim().isNotEmpty) {
-      chunks.add(currentChunk.trim());
-    }
-    
-    // If no chunks created (no sentence endings), split by character limit
-    if (chunks.isEmpty && text.isNotEmpty) {
-      for (int i = 0; i < text.length; i += maxChunkSize) {
-        int end = (i + maxChunkSize < text.length) ? i + maxChunkSize : text.length;
-        chunks.add(text.substring(i, end));
-      }
-    }
-    
-    return chunks;
   }
 
   Future<void> _generateAudio() async {
@@ -427,7 +337,7 @@ class _TTSHomePageState extends State<TTSHomePage> {
       _isLoading = true;
     });
 
-    bool hasInternet = await _checkInternetConnection();
+    bool hasInternet = await TTSService.checkInternet();
     if (!hasInternet) {
       setState(() {
         _isLoading = false;
@@ -449,178 +359,43 @@ class _TTSHomePageState extends State<TTSHomePage> {
       return;
     }
 
-    // For large texts, split into chunks
-    const int maxChunkSize = 250; // characters per chunk for better quality
-    List<String> chunks;
-    
-    if (text.length > maxChunkSize) {
-      chunks = _splitTextIntoChunks(text, maxChunkSize);
-    } else {
-      chunks = [text];
-    }
-    
-    // Calculate estimated time based on chunks
-    _estimatedSeconds = chunks.length * 10; // ~10 seconds per chunk
-    
+    // Estimate time for progress display
+    _estimatedSeconds = (text.length / 250).ceil() * 10;
     _startProgressTimer();
-    
-    List<List<int>> audioBytes = [];
-    
-    for (int i = 0; i < chunks.length; i++) {
-      setState(() {
-        _statusMessage = 'Processing ${i + 1}/${chunks.length}...';
-      });
-      
-      try {
-        final response = await http.post(
-          Uri.parse(apiUrl),
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-          },
-          body: json.encode({
-            'text': chunks[i],
-            'speed': 0.9,
-          }),
-        ).timeout(const Duration(seconds: 120));
 
-        if (response.statusCode == 200) {
-          audioBytes.add(response.bodyBytes);
-        } else if (response.statusCode == 503) {
-          // Server starting, wait and retry this chunk
+    // Use shared TTSService for synthesis (handles chunking, retries, WAV combining)
+    final filePath = await TTSService.synthesize(
+      text,
+      onStatus: (status) {
+        if (mounted) {
           setState(() {
-            _statusMessage = 'Server starting, retrying...';
+            _statusMessage = status;
           });
-          await Future.delayed(const Duration(seconds: 10));
-          i--; // Retry same chunk
-          continue;
-        } else {
-          throw Exception('Server error: ${response.statusCode}');
         }
-      } on TimeoutException {
-        // Retry once on timeout
-        setState(() {
-          _statusMessage = 'Retrying ${i + 1}/${chunks.length}...';
-        });
-        try {
-          final response = await http.post(
-            Uri.parse(apiUrl),
-            headers: {
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: json.encode({
-              'text': chunks[i],
-              'speed': 0.9,
-            }),
-          ).timeout(const Duration(seconds: 180));
-          
-          if (response.statusCode == 200) {
-            audioBytes.add(response.bodyBytes);
-          } else {
-            throw Exception('Failed after retry');
-          }
-        } catch (e) {
-          _stopProgressTimer();
-          setState(() {
-            _isLoading = false;
-            _statusMessage = '';
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed at part ${i + 1}. Try with shorter text.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-          return;
-        }
-      } catch (e) {
-        _stopProgressTimer();
-        setState(() {
-          _isLoading = false;
-          _statusMessage = '';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error at part ${i + 1}: ${e.toString().split(':').last}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-    }
-    
+      },
+    );
+
     _stopProgressTimer();
-    
-    // Combine all audio chunks
-    if (audioBytes.isNotEmpty) {
+
+    if (filePath != null) {
       setState(() {
-        _statusMessage = 'Combining audio...';
+        _audioPath = filePath;
+        _isLoading = false;
+        _statusMessage = '';
+        _audioGenerated = true;
       });
-      
-      try {
-        final directory = await getTemporaryDirectory();
-        final filePath = '${directory.path}/gujarati_tts_${DateTime.now().millisecondsSinceEpoch}.wav';
-        
-        // Simple concatenation - combine WAV data
-        // For WAV files, we need to handle headers properly
-        List<int> combinedAudio = [];
-        
-        if (audioBytes.length == 1) {
-          // Single chunk, use as-is
-          combinedAudio = audioBytes[0];
-        } else {
-          // Multiple chunks - combine raw audio data
-          // First file: keep full header (44 bytes for WAV)
-          combinedAudio.addAll(audioBytes[0]);
-          
-          // Add short silence between chunks for natural pauses
-          final silencePadding = List<int>.filled(4800, 0);
-          
-          // Subsequent files: skip WAV header (44 bytes)
-          for (int i = 1; i < audioBytes.length; i++) {
-            combinedAudio.addAll(silencePadding);
-            if (audioBytes[i].length > 44) {
-              combinedAudio.addAll(audioBytes[i].sublist(44));
-            }
-          }
-          
-          // Update WAV header with new file size
-          int dataSize = combinedAudio.length - 44;
-          int fileSize = combinedAudio.length - 8;
-          
-          // Update RIFF chunk size (bytes 4-7)
-          combinedAudio[4] = fileSize & 0xFF;
-          combinedAudio[5] = (fileSize >> 8) & 0xFF;
-          combinedAudio[6] = (fileSize >> 16) & 0xFF;
-          combinedAudio[7] = (fileSize >> 24) & 0xFF;
-          
-          // Update data chunk size (bytes 40-43)
-          combinedAudio[40] = dataSize & 0xFF;
-          combinedAudio[41] = (dataSize >> 8) & 0xFF;
-          combinedAudio[42] = (dataSize >> 16) & 0xFF;
-          combinedAudio[43] = (dataSize >> 24) & 0xFF;
-        }
-        
-        final file = File(filePath);
-        await file.writeAsBytes(combinedAudio);
 
-        setState(() {
-          _audioPath = filePath;
-          _isLoading = false;
-          _statusMessage = '';
-          _audioGenerated = true;
-        });
-
-        // Auto-play the generated audio
-        await _playAudio();
-        
-      } catch (e) {
-        setState(() {
-          _isLoading = false;
-          _statusMessage = '';
-        });
+      // Auto-play the generated audio
+      await _playAudio();
+    } else {
+      setState(() {
+        _isLoading = false;
+        _statusMessage = '';
+      });
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Error saving audio file'),
+            content: Text('Failed to generate audio. Please try again.'),
             backgroundColor: Colors.red,
           ),
         );

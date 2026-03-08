@@ -46,11 +46,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _speechEnabled = false;
   String _lastWords = '';
 
-  // Free AI APIs
+  // HuggingFace fallback API
   static const String _hfApiUrl =
       'https://api-inference.huggingface.co/models/google/gemma-2-2b-it';
-  static const String _hfApiUrl2 =
-      'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3';
 
   @override
   void initState() {
