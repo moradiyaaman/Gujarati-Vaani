@@ -25,6 +25,8 @@ from transformers import VitsModel, AutoTokenizer
 SAMPLE_RATE = 16000
 NUM_THREADS = 2  # Reduced for faster single-request processing
 MODEL_DIR = Path("./gujarati_tts_model")
+MODEL_REPO_ID = "moradiyaaman/gujarati-tts-model"
+FALLBACK_MODEL_ID = "facebook/mms-tts-guj"
 
 # Azure Blob Storage Configuration
 AZURE_ACCOUNT = "gujarativaaniw1824455535"
@@ -161,6 +163,7 @@ def preprocess_gujarati_text(text):
 # Global model variables
 model = None
 tokenizer = None
+MODEL_SOURCE = "unknown"
 
 # FastAPI app
 app = FastAPI(
@@ -212,9 +215,12 @@ def download_from_azure():
         ("tokenizer/vocab.json", tokenizer_dir / "vocab.json"),
     ]
     
+    successful_downloads = 0
+
     for blob_path, local_path in files_to_download:
         if local_path.exists():
             logger.info(f"✓ {blob_path} (cached)")
+            successful_downloads += 1
             continue
             
         url = f"{AZURE_BASE_URL}/{blob_path}?{AZURE_SAS_TOKEN}"
@@ -222,21 +228,41 @@ def download_from_azure():
             logger.info(f"Downloading {blob_path}...")
             urllib.request.urlretrieve(url, local_path)
             logger.info(f"✓ Downloaded {blob_path}")
+            successful_downloads += 1
         except Exception as e:
             logger.error(f"Failed to download {blob_path}: {e}")
     
     logger.info("Model download complete!")
+    return successful_downloads
+
+
+def _has_local_model_files() -> bool:
+    """Check whether all required local model files are present."""
+    original_dir = MODEL_DIR / "original"
+    tokenizer_dir = MODEL_DIR / "tokenizer"
+
+    required_files = [
+        original_dir / "config.json",
+        original_dir / "model.safetensors",
+        tokenizer_dir / "config.json",
+        tokenizer_dir / "special_tokens_map.json",
+        tokenizer_dir / "tokenizer_config.json",
+        tokenizer_dir / "vocab.json",
+    ]
+
+    missing = [str(path) for path in required_files if not path.exists()]
+    if missing:
+        logger.warning("Missing local model files: %s", ", ".join(missing))
+        return False
+    return True
 
 def load_model():
     """Load the fine-tuned MMS-TTS Gujarati model."""
-    global model, tokenizer
+    global model, tokenizer, MODEL_SOURCE
     
     logger.info("=" * 60)
     logger.info("Loading Fine-Tuned Gujarati TTS Model")
     logger.info("=" * 60)
-    
-    # Download from Azure
-    download_from_azure()
     
     # Set CPU threads
     torch.set_num_threads(NUM_THREADS)
@@ -244,20 +270,28 @@ def load_model():
     
     original_dir = MODEL_DIR / "original"
     tokenizer_dir = MODEL_DIR / "tokenizer"
-    
-    # Load tokenizer
-    logger.info(f"Loading tokenizer from {tokenizer_dir}")
-    tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_dir))
-    logger.info("✓ Tokenizer loaded")
-    
-    # Load model
-    logger.info(f"Loading model from {original_dir}")
-    model = VitsModel.from_pretrained(str(original_dir))
-    model.eval()
-    logger.info("✓ Model loaded and set to eval mode")
+
+    if _has_local_model_files():
+        # Prefer the fine-tuned model when all local artifacts are available.
+        logger.info(f"Loading tokenizer from {tokenizer_dir}")
+        tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_dir))
+        logger.info("✓ Tokenizer loaded")
+
+        logger.info(f"Loading model from {original_dir}")
+        model = VitsModel.from_pretrained(str(original_dir))
+        model.eval()
+        MODEL_SOURCE = "azure_finetuned"
+        logger.info("✓ Model loaded and set to eval mode")
+    else:
+        logger.warning("Local model artifacts unavailable. Loading from %s", MODEL_REPO_ID)
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO_ID)
+        model = VitsModel.from_pretrained(MODEL_REPO_ID)
+        model.eval()
+        MODEL_SOURCE = f"hub:{MODEL_REPO_ID}"
+        logger.info("✓ Hub model loaded and set to eval mode")
     
     logger.info("=" * 60)
-    logger.info("Model ready for inference!")
+    logger.info("Model ready for inference! Source: %s", MODEL_SOURCE)
     logger.info("=" * 60)
 
 @app.on_event("startup")
@@ -281,6 +315,7 @@ async def health():
     return {
         "status": "healthy",
         "model_loaded": model is not None and tokenizer is not None,
+        "model_source": MODEL_SOURCE,
         "version": "1.0.0"
     }
 
