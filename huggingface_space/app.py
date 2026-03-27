@@ -284,8 +284,8 @@ def load_model():
         logger.info("✓ Model loaded and set to eval mode")
     else:
         logger.warning("Local model artifacts unavailable. Loading from %s", MODEL_REPO_ID)
-        tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO_ID)
-        model = VitsModel.from_pretrained(MODEL_REPO_ID)
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_REPO_ID, subfolder="tokenizer")
+        model = VitsModel.from_pretrained(MODEL_REPO_ID, subfolder="original")
         model.eval()
         MODEL_SOURCE = f"hub:{MODEL_REPO_ID}"
         logger.info("✓ Hub model loaded and set to eval mode")
